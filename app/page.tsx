@@ -51,7 +51,7 @@ export default function Page() {
 
         const map = new maplibregl.Map({
           container: containerRef.current!,
-          style: `https://api.maptiler.com/maps/dataviz/style.json?key=${data.key}`,
+          style: `https://api.maptiler.com/maps/dataviz-dark/style.json?key=${data.key}`,
           center: [-71.1505, 8.582],
           zoom: 12.6,
         });
@@ -181,8 +181,10 @@ export default function Page() {
 
     return () => {
       popupRef.current?.remove();
-      map.remove();
-      mapRef.current = null;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     };
   }, [selectedParish?.id]);
 
