@@ -1,0 +1,19 @@
+version: '3'
+
+services:
+  mapas-app:
+    container_name: mapas-libertador
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_MAPTILER_KEY=${NEXT_PUBLIC_MAPTILER_KEY}
+    networks:
+      - mapas-net
+
+networks:
+  mapas-net:
+    driver: bridge
