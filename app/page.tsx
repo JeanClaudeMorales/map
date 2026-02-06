@@ -1,3 +1,5 @@
+"use client";
+
 import maplibregl, { Map, Popup, Marker } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import * as turf from "@turf/turf";
