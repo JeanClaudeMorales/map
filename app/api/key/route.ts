@@ -13,7 +13,9 @@ export async function GET() {
 
 
     if (!key) {
-        return NextResponse.json({ error: "API Key not configured" }, { status: 500 });
+        return NextResponse.json({
+            error: `API Key not configured. Debug Status: NEXT_PUBLIC=${hasNextPublic}, MAPTILER=${hasMaptiler}`
+        }, { status: 500 });
     }
 
     return NextResponse.json({ key });
