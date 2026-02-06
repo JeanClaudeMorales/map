@@ -13,8 +13,11 @@ export async function GET() {
 
 
     if (!key) {
+        // Search for any keys that look similar (debugging)
+        const relevantKeys = Object.keys(process.env).filter(k => k.includes("MAP") || k.includes("KEY")).join(", ");
+
         return NextResponse.json({
-            error: `API Key not configured. Debug Status: NEXT_PUBLIC=${hasNextPublic}, MAPTILER=${hasMaptiler}`
+            error: `API Key missing. NODE_ENV=${process.env.NODE_ENV}. Found keys: [${relevantKeys}]. Status: NEXT_PUBLIC=${hasNextPublic}, MAPTILER=${hasMaptiler}`
         }, { status: 500 });
     }
 
