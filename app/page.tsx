@@ -45,7 +45,8 @@ export default function Page() {
       .then((res) => res.json())
       .then((data) => {
         if (!data.key) {
-          alert("Falta NEXT_PUBLIC_MAPTILER_KEY en las variables de entorno del servidor.");
+          const msg = data.error || "Falta NEXT_PUBLIC_MAPTILER_KEY en las variables de entorno del servidor.";
+          alert(msg);
           return;
         }
 

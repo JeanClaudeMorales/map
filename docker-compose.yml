@@ -13,6 +13,7 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_MAPTILER_KEY=${NEXT_PUBLIC_MAPTILER_KEY}
+      - MAPTILER_KEY=${MAPTILER_KEY}
     networks:
       - mapas-net
 
