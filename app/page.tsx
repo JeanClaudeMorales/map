@@ -10,9 +10,7 @@ type FC = GeoJSON.FeatureCollection<GeoJSON.Geometry>;
 const PARISH_SRC_ID = "parroquias";
 const PARISH_FILL_ID = "parroquias-fill";
 const PARISH_LINE_ID = "parroquias-line";
-
-const MARKERS_SRC_ID = "markers";
-const MARKERS_LAYER_ID = "markers-layer";
+const PARISH_LABEL_ID = "parroquias-label";
 
 const SIGNALS_SRC_ID = "signals-sector";
 const SIGNALS_LAYER_ID = "signals-sector-fill";
@@ -28,21 +26,21 @@ interface Signal {
   beamwidth?: number; // degrees
   radius?: number; // km
   color?: string; // hex
-  markerRef?: Marker; // Legacy/Cleanup
+}
+
+interface ParishStyles {
+  visible: boolean;
+  opacity: number;
+  color: string;
+  onlyOutline: boolean;
 }
 
 function loadMarkers(): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  if (typeof window === "undefined") return { type: "FeatureCollection", features: [] };
   try {
     const raw = localStorage.getItem("markers_fc");
-    if (!raw) return { type: "FeatureCollection", features: [] };
-    return JSON.parse(raw);
-  } catch {
-    return { type: "FeatureCollection", features: [] };
-  }
-}
-
-function saveMarkers(fc: GeoJSON.FeatureCollection<GeoJSON.Point>) {
-  localStorage.setItem("markers_fc", JSON.stringify(fc));
+    return raw ? JSON.parse(raw) : { type: "FeatureCollection", features: [] };
+  } catch { return { type: "FeatureCollection", features: [] }; }
 }
 
 export default function Page() {
@@ -50,28 +48,31 @@ export default function Page() {
   const mapRef = useRef<Map | null>(null);
   const popupRef = useRef<Popup | null>(null);
 
-  const [selectedParish, setSelectedParish] = useState<{ id?: string; name?: string; name_full?: string } | null>(null);
-  const [markers, setMarkers] = useState<GeoJSON.FeatureCollection<GeoJSON.Point>>({ type: "FeatureCollection", features: [] });
+  // Selection State
+  const [selectedElement, setSelectedElement] = useState<{ id: string; type: "signal" | "parish" } | null>(null);
 
   // Advanced Signals State
   const [activeTool, setActiveTool] = useState<"none" | "pulse" | "sector">("none");
   const [signals, setSignals] = useState<Signal[]>([]);
 
-  // Configuration State
+  // Configuration State (Defaults for new elements)
   const [config, setConfig] = useState({
     radius: 500, // meters
     angle: 360, // degrees
-    azimuth: 0, // degrees (North)
-    color: "#00e5ff", // hex
+    azimuth: 0,
+    color: "#00e5ff",
   });
 
-  // Parish Styles State
-  const [parishStyles, setParishStyles] = useState({
+  // Parish Global Styles
+  const [globalParishStyles, setGlobalParishStyles] = useState<ParishStyles>({
     visible: true,
     opacity: 0.15,
     color: "#ffffff",
     onlyOutline: false,
   });
+
+  // Individual Parish Overrides
+  const [parishOverrides, setParishOverrides] = useState<Record<string, Partial<ParishStyles>>>({});
 
   // Animation Refs
   const animationFrameRef = useRef<number | undefined>(undefined);
@@ -79,16 +80,10 @@ export default function Page() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const saved = loadMarkers();
-    setMarkers(saved);
-
     fetch("/api/key")
       .then((res) => res.json())
       .then((data) => {
-        if (!data.key) {
-          alert(data.error || "Falta API Key");
-          return;
-        }
+        if (!data.key) return;
 
         const map = new maplibregl.Map({
           container: containerRef.current!,
@@ -99,266 +94,231 @@ export default function Page() {
 
         mapRef.current = map;
         popupRef.current = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
-
         map.addControl(new maplibregl.NavigationControl(), "top-right");
-
-        let hoveredId: string | number | null = null;
 
         map.on("load", async () => {
           // --- Parroquias ---
-          try {
-            const res = await fetch("/data/parroquias_libertador_14.geojson");
-            const parroquias = (await res.json()) as FC;
+          const res = await fetch("/data/parroquias_libertador_14.geojson");
+          const parroquias = (await res.json()) as FC;
 
-            map.addSource(PARISH_SRC_ID, { type: "geojson", data: parroquias, promoteId: "id" } as any);
-            map.addLayer({
-              id: PARISH_FILL_ID,
-              type: "fill",
-              source: PARISH_SRC_ID,
-              layout: { visibility: "visible" },
-              paint: {
-                "fill-color": parishStyles.color,
-                "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.3, parishStyles.opacity],
-              },
-            });
-            map.addLayer({
-              id: PARISH_LINE_ID,
-              type: "line",
-              source: PARISH_SRC_ID,
-              paint: {
-                "line-color": "#ffffff",
-                "line-opacity": 0.8,
-                "line-width": 1,
-              },
-            });
-          } catch (e) {
-            console.error("Failed to load parroquias", e);
-          }
+          map.addSource(PARISH_SRC_ID, { type: "geojson", data: parroquias, promoteId: "id" } as any);
 
-          // --- Markers ---
-          map.addSource(MARKERS_SRC_ID, { type: "geojson", data: saved });
           map.addLayer({
-            id: MARKERS_LAYER_ID,
-            type: "circle",
-            source: MARKERS_SRC_ID,
+            id: PARISH_FILL_ID,
+            type: "fill",
+            source: PARISH_SRC_ID,
             paint: {
-              "circle-radius": 5,
-              "circle-color": "#00e5ff",
-              "circle-opacity": 0.8,
+              "fill-color": ["coalesce", ["get", "color"], "#ffffff"],
+              "fill-opacity": ["coalesce", ["get", "opacity"], 0.15],
             },
           });
 
-          // --- Signals Coverage ---
+          map.addLayer({
+            id: PARISH_LINE_ID,
+            type: "line",
+            source: PARISH_SRC_ID,
+            paint: {
+              "line-color": "#ffffff",
+              "line-opacity": 0.8,
+              "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 1],
+            },
+          });
+
+          // Labels
+          map.addLayer({
+            id: PARISH_LABEL_ID,
+            type: "symbol",
+            source: PARISH_SRC_ID,
+            layout: {
+              "text-field": ["get", "name_full"],
+              "text-font": ["Noto Sans Bold"],
+              "text-size": 11,
+              "text-variable-anchor": ["top", "bottom", "left", "right"],
+              "text-radial-offset": 0.5,
+              "text-justify": "auto",
+            },
+            paint: {
+              "text-color": "#ffffff",
+              "text-halo-color": "rgba(0,0,0,0.8)",
+              "text-halo-width": 1,
+            }
+          });
+
+          // --- Signals ---
           map.addSource(SIGNALS_SRC_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+
           map.addLayer({
             id: SIGNALS_LAYER_ID,
             type: "fill",
             source: SIGNALS_SRC_ID,
+            filter: ["==", "$type", "Polygon"],
             paint: {
               "fill-color": ["get", "color"],
               "fill-opacity": 0.3,
             },
           });
 
-          // --- Signals Center Points ---
           map.addLayer({
             id: SIGNALS_CENTER_ID,
             type: "circle",
             source: SIGNALS_SRC_ID,
             filter: ["==", "$type", "Point"],
             paint: {
-              "circle-radius": 3,
+              "circle-radius": ["case", ["==", ["get", "selected"], true], 7, 4],
               "circle-color": ["get", "color"],
-              "circle-opacity": 1,
-              "circle-stroke-color": "#000",
-              "circle-stroke-width": 1,
+              "circle-stroke-color": ["case", ["==", ["get", "selected"], true], "#fff", "#000"],
+              "circle-stroke-width": 2,
             },
           });
 
-          // --- Signals Wave (Radar) ---
           map.addSource(SIGNALS_WAVE_SRC_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
           map.addLayer({
             id: SIGNALS_WAVE_ID,
             type: "fill",
             source: SIGNALS_WAVE_SRC_ID,
-            paint: {
-              "fill-color": ["get", "color"],
-              "fill-opacity": 0.2, // Will be animated
-            },
+            paint: { "fill-color": ["get", "color"], "fill-opacity": 0.2 },
           });
 
-          // --- Interaction ---
-          map.on("mousemove", PARISH_FILL_ID, (e) => {
-            map.getCanvas().style.cursor = "pointer";
-            const f = e.features?.[0];
-            if (!f) return;
-            const id = (f.properties as any)?.id ?? f.id;
-            if (id == null) return;
-            if (hoveredId !== null && hoveredId !== id) {
-              map.setFeatureState({ source: PARISH_SRC_ID, id: hoveredId }, { hover: false });
+          // Selection Handlers
+          map.on("click", (e) => {
+            const features = map.queryRenderedFeatures(e.point, { layers: [SIGNALS_CENTER_ID, PARISH_FILL_ID] });
+
+            if (features.length === 0) {
+              if (activeTool === "none") setSelectedElement(null);
+              return;
             }
-            hoveredId = id;
-            map.setFeatureState({ source: PARISH_SRC_ID, id }, { hover: true });
-            const name = (f.properties as any)?.name_full ?? (f.properties as any)?.name ?? "Parroquia";
-            popupRef.current!.setLngLat(e.lngLat).setHTML(`<div style="font-family:system-ui;font-size:12px">${name}</div>`).addTo(map);
-          });
 
-          map.on("mouseleave", PARISH_FILL_ID, () => {
-            map.getCanvas().style.cursor = "";
-            popupRef.current?.remove();
-            if (hoveredId !== null) map.setFeatureState({ source: PARISH_SRC_ID, id: hoveredId }, { hover: false });
-            hoveredId = null;
-          });
+            const signal = features.find(f => f.layer.id === SIGNALS_CENTER_ID);
+            const parish = features.find(f => f.layer.id === PARISH_FILL_ID);
 
-          map.on("click", PARISH_FILL_ID, (e) => {
-            const f = e.features?.[0];
-            if (!f) return;
-            setSelectedParish({
-              id: (f.properties as any)?.id ?? (f.id as any),
-              name: (f.properties as any)?.name ?? "",
-              name_full: (f.properties as any)?.name_full ?? (f.properties as any)?.name ?? "",
-            });
+            if (signal) {
+              setSelectedElement({ id: String(signal.properties?.id), type: "signal" });
+            } else if (parish && activeTool === 'none') {
+              const pId = String(parish.id ?? parish.properties?.id);
+              setSelectedElement({ id: pId, type: "parish" });
+            }
           });
         });
-      })
-      .catch((err) => console.error("Error loading:", err));
+      });
 
-    return () => {
-      mapRef.current?.remove();
-      mapRef.current = null;
-    };
-  }, []);
+    return () => { mapRef.current?.remove(); mapRef.current = null; };
+  }, [activeTool]);
 
-  // Sync Parish Styles
+  // Update Signals Source Logic
+  const updateSignalsSource = (map: Map, signalsList: Signal[]) => {
+    const source = map.getSource(SIGNALS_SRC_ID) as maplibregl.GeoJSONSource;
+    if (!source) return;
+
+    const sectors = signalsList.map((s) => {
+      const b1 = (s.azimuth || 0) - ((s.beamwidth || 360) / 2);
+      const b2 = (s.azimuth || 0) + ((s.beamwidth || 360) / 2);
+      return turf.sector(s.lngLat, s.radius || 0.5, b1, b2, {
+        properties: { id: s.id, color: s.color, selected: selectedElement?.id === s.id }
+      });
+    });
+    const centers = signalsList.map((s) => turf.point(s.lngLat, { id: s.id, color: s.color, selected: selectedElement?.id === s.id }));
+    source.setData({ type: "FeatureCollection", features: [...sectors, ...centers] });
+  };
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    updateSignalsSource(map, signals);
+  }, [selectedElement, signals]);
+
+  // Sync Parish Styles (Baking overrides into GeoJSON)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
 
-    map.setLayoutProperty(PARISH_FILL_ID, "visibility", parishStyles.visible ? "visible" : "none");
-    map.setLayoutProperty(PARISH_LINE_ID, "visibility", parishStyles.visible ? "visible" : "none");
+    const source = map.getSource(PARISH_SRC_ID) as maplibregl.GeoJSONSource;
+    if (!source) return;
 
-    const opacity = parishStyles.onlyOutline ? 0 : parishStyles.opacity;
-    map.setPaintProperty(PARISH_FILL_ID, "fill-opacity", [
-      "case",
-      ["boolean", ["feature-state", "hover"], false],
-      0.3,
-      opacity,
-    ]);
-    map.setPaintProperty(PARISH_FILL_ID, "fill-color", parishStyles.color);
-  }, [parishStyles]);
+    fetch("/data/parroquias_libertador_14.geojson")
+      .then(r => r.json())
+      .then((data: FC) => {
+        data.features.forEach(f => {
+          const id = String(f.id ?? f.properties?.id);
+          const override = parishOverrides[id];
+          const styles = { ...globalParishStyles, ...override };
 
-  // Handle Signal Creation
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    const onClick = (e: maplibregl.MapMouseEvent) => {
-      if (activeTool === "none") return;
-      const { lng, lat } = e.lngLat;
-      const id = `s_${Date.now()}`;
-      const radiusKm = config.radius / 1000;
-
-      const newSignal: Signal = {
-        id,
-        type: activeTool,
-        lngLat: [lng, lat],
-        radius: radiusKm,
-        azimuth: config.azimuth,
-        beamwidth: activeTool === "pulse" ? 360 : config.angle,
-        color: config.color,
-      };
-
-      setSignals((prev) => {
-        const next = [...prev, newSignal];
-        updateSignalsSource(map, next);
-        return next;
+          f.properties = {
+            ...f.properties,
+            id: id,
+            color: styles.color,
+            opacity: styles.visible ? (styles.onlyOutline ? 0 : styles.opacity) : 0,
+            selected: selectedElement?.id === id && selectedElement.type === 'parish'
+          };
+          map.setFeatureState({ source: PARISH_SRC_ID, id }, { selected: selectedElement?.id === id });
+        });
+        source.setData(data);
       });
-      setActiveTool("none");
-    };
-
-    map.on("click", onClick);
-    return () => { map.off("click", onClick); };
-  }, [activeTool, config]);
-
-  // Update Main Signals Source
-  function updateSignalsSource(map: Map, signalsList: Signal[]) {
-    // 1. Coverage Polygons (Static)
-    const sectors = signalsList.map((s) => {
-      const b1 = s.azimuth! - (s.beamwidth! / 2);
-      const b2 = s.azimuth! + (s.beamwidth! / 2);
-      return turf.sector(s.lngLat, s.radius!, b1, b2, {
-        properties: { id: s.id, color: s.color },
-      });
-    });
-
-    // 2. Center Points
-    const centers = signalsList.map((s) => turf.point(s.lngLat, { id: s.id, color: s.color }));
-
-    (map.getSource(SIGNALS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({
-      type: "FeatureCollection",
-      features: [...sectors, ...centers],
-    });
-  }
+  }, [parishOverrides, globalParishStyles, selectedElement]);
 
   // Radar Animation Loop
   useEffect(() => {
     const animate = () => {
       const map = mapRef.current;
-      if (!map || signals.length === 0) {
-        animationFrameRef.current = requestAnimationFrame(animate);
-        return;
-      }
-
-      const timestamp = Date.now();
-      const cycle = 3000; // 3 seconds per radar sweep
-      const progress = (timestamp % cycle) / cycle; // 0 to 1
-
-      // Expanding Wave Geometries
+      if (!map || signals.length === 0) { animationFrameRef.current = requestAnimationFrame(animate); return; }
+      const progress = (Date.now() % 3000) / 3000;
       const waves = signals.map((s) => {
-        const waveRadius = Math.max(0.001, s.radius! * progress);
-        const b1 = s.azimuth! - (s.beamwidth! / 2);
-        const b2 = s.azimuth! + (s.beamwidth! / 2);
-
-        let geometry;
-        if (s.beamwidth === 360) {
-          geometry = turf.circle(s.lngLat, waveRadius, { steps: 64 });
-        } else {
-          geometry = turf.sector(s.lngLat, waveRadius, b1, b2);
-        }
-
-        return {
-          ...geometry,
-          properties: { id: s.id, color: s.color },
-        };
+        const r = s.radius || 0.5;
+        const beam = s.beamwidth || 360;
+        const az = s.azimuth || 0;
+        const waveRadius = Math.max(0.001, r * progress);
+        const geom = beam === 360 ? turf.circle(s.lngLat, waveRadius) : turf.sector(s.lngLat, waveRadius, az - (beam / 2), az + (beam / 2));
+        return { ...geom, properties: { color: s.color } };
       });
-
-      // Update Wave Source
-      (map.getSource(SIGNALS_WAVE_SRC_ID) as maplibregl.GeoJSONSource)?.setData({
-        type: "FeatureCollection",
-        features: waves as any,
-      });
-
-      // Update Wave Opacity (Fades out as it expands)
-      const waveOpacity = 0.5 * (1 - progress);
-      if (map.getLayer(SIGNALS_WAVE_ID)) {
-        map.setPaintProperty(SIGNALS_WAVE_ID, 'fill-opacity', waveOpacity);
-      }
-
+      (map.getSource(SIGNALS_WAVE_SRC_ID) as maplibregl.GeoJSONSource)?.setData({ type: "FeatureCollection", features: waves as any });
+      if (map.getLayer(SIGNALS_WAVE_ID)) map.setPaintProperty(SIGNALS_WAVE_ID, 'fill-opacity', 0.4 * (1 - progress));
       animationFrameRef.current = requestAnimationFrame(animate);
     };
-
     animationFrameRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationFrameRef.current!);
   }, [signals]);
 
-  function clearMarkers() {
-    setMarkers({ type: "FeatureCollection", features: [] });
-    saveMarkers({ type: "FeatureCollection", features: [] });
-    (mapRef.current?.getSource(MARKERS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({ type: "FeatureCollection", features: [] });
-    setSignals([]);
-    (mapRef.current?.getSource(SIGNALS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({ type: "FeatureCollection", features: [] });
-    (mapRef.current?.getSource(SIGNALS_WAVE_SRC_ID) as maplibregl.GeoJSONSource)?.setData({ type: "FeatureCollection", features: [] });
-  }
+  // Add click handler
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const onAddClick = (e: maplibregl.MapMouseEvent) => {
+      if (activeTool === "none") return;
+      const id = `s_${Date.now()}`;
+      const newSignal: Signal = {
+        id,
+        type: activeTool,
+        lngLat: [e.lngLat.lng, e.lngLat.lat],
+        radius: config.radius / 1000,
+        azimuth: config.azimuth,
+        beamwidth: activeTool === "pulse" ? 360 : config.angle,
+        color: config.color,
+      };
+      setSignals(prev => [...prev, newSignal]);
+      setActiveTool("none");
+      setSelectedElement({ id, type: "signal" });
+    };
+    map.on("click", onAddClick);
+    return () => { map.off("click", onAddClick); };
+  }, [activeTool, config]);
+
+  const updateSelected = (updates: Partial<typeof config>) => {
+    if (selectedElement?.type === 'signal') {
+      setSignals(prev => prev.map(s => s.id === selectedElement.id ? {
+        ...s,
+        ...updates,
+        radius: updates.radius !== undefined ? updates.radius / 1000 : s.radius,
+        beamwidth: updates.angle !== undefined ? updates.angle : s.beamwidth,
+        azimuth: updates.azimuth !== undefined ? updates.azimuth : s.azimuth,
+        color: updates.color !== undefined ? updates.color : s.color
+      } : s));
+    } else { setConfig({ ...config, ...updates }); }
+  };
+
+  const updateSelectedParish = (updates: Partial<ParishStyles>) => {
+    if (selectedElement?.type === 'parish') {
+      setParishOverrides(prev => ({ ...prev, [selectedElement.id]: { ...prev[selectedElement.id], ...updates } }));
+    } else { setGlobalParishStyles({ ...globalParishStyles, ...updates }); }
+  };
 
   const toggleTool = (tool: "pulse" | "sector") => {
     if (activeTool === tool) setActiveTool("none");
@@ -369,88 +329,84 @@ export default function Page() {
     }
   };
 
+  const currentConfig = selectedElement?.type === 'signal'
+    ? {
+      radius: Math.round((signals.find(s => s.id === selectedElement.id)?.radius || 0) * 1000),
+      angle: signals.find(s => s.id === selectedElement.id)?.beamwidth || 360,
+      azimuth: signals.find(s => s.id === selectedElement.id)?.azimuth || 0,
+      color: signals.find(s => s.id === selectedElement.id)?.color || "#ffffff"
+    }
+    : config;
+
+  const currentParish = selectedElement?.type === 'parish'
+    ? { ...globalParishStyles, ...parishOverrides[selectedElement.id] }
+    : globalParishStyles;
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh" }}>
       <aside style={{ padding: 14, borderRight: "1px solid rgba(255,255,255,0.08)", overflowY: "auto", background: "#050b12" }}>
-        <h2 style={{ margin: 0, fontSize: 16 }}>Libertador / Mérida</h2>
-        <p style={{ marginTop: 6, opacity: 0.75, fontSize: 13 }}>Sistema de Gestión de Redes</p>
+        <h2 style={{ margin: 0, fontSize: 16 }}>Mapas Netlink</h2>
 
-        {/* Signals Configuration */}
-        <div style={{ marginTop: 20, padding: 16, background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)" }}>
-          <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Configuración de Señal</div>
-
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <label style={{ fontSize: 13 }}>Radio</label>
-              <span style={{ fontSize: 13, opacity: 0.7 }}>{config.radius} m</span>
+        {selectedElement && (
+          <div style={{ marginTop: 10, padding: 10, background: "#00e5ff1a", borderRadius: 8, border: "1px solid #00e5ff44" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+              <span>Editando: <b>{selectedElement.type.toUpperCase()}</b></span>
+              <button onClick={() => setSelectedElement(null)} style={{ padding: '2px 8px', fontSize: 10 }}>Descartar</button>
             </div>
-            <input type="range" min="50" max="10000" step="50" value={config.radius} onChange={(e) => setConfig({ ...config, radius: Number(e.target.value) })} style={{ width: "100%" }} />
+            {selectedElement.type === 'signal' && (
+              <button onClick={() => { setSignals(prev => prev.filter(s => s.id !== selectedElement.id)); setSelectedElement(null); }} style={{ marginTop: 8, width: '100%', fontSize: 11, color: '#ff4444' }}>Eliminar Señal</button>
+            )}
           </div>
+        )}
 
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <label style={{ fontSize: 13 }}>Apertura</label>
-              <span style={{ fontSize: 13, opacity: 0.7 }}>{config.angle}°</span>
+        <div style={{ marginTop: 20, padding: 16, background: "rgba(255,255,255,0.03)", borderRadius: 8 }}>
+          <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 16, fontWeight: 700 }}>{selectedElement?.type === 'signal' ? 'PROPIEDADES DE SEÑAL' : 'NUEVA SEÑAL'}</div>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+              <label>Radio</label>
+              <span style={{ color: '#00e5ff' }}>{currentConfig.radius} m</span>
             </div>
-            <input type="range" min="10" max="360" step="10" value={config.angle} onChange={(e) => setConfig({ ...config, angle: Number(e.target.value) })} style={{ width: "100%" }} />
+            <input type="range" min="50" max="15000" step="50" value={currentConfig.radius} onChange={(e) => updateSelected({ radius: Number(e.target.value) })} style={{ width: "100%" }} />
           </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <label style={{ fontSize: 13 }}>Azimut (Orientación)</label>
-              <span style={{ fontSize: 13, opacity: 0.7 }}>{config.azimuth}°</span>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+              <label>Ángulo</label>
+              <span>{currentConfig.angle}°</span>
             </div>
-            <input type="range" min="0" max="360" step="5" value={config.azimuth} onChange={(e) => setConfig({ ...config, azimuth: Number(e.target.value) })} style={{ width: "100%" }} />
+            <input type="range" min="10" max="360" step="10" value={currentConfig.angle} onChange={(e) => updateSelected({ angle: Number(e.target.value) })} style={{ width: "100%" }} />
           </div>
-
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+              <label>Azimut</label>
+              <span>{currentConfig.azimuth}°</span>
+            </div>
+            <input type="range" min="0" max="360" step="1" value={currentConfig.azimuth} onChange={(e) => updateSelected({ azimuth: Number(e.target.value) })} style={{ width: "100%" }} />
+          </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <label style={{ fontSize: 13 }}>Color</label>
-            <input type="color" value={config.color} onChange={(e) => setConfig({ ...config, color: e.target.value })} style={{ border: "none", width: 24, height: 24, padding: 0, background: "none", cursor: "pointer" }} />
+            <input type="color" value={currentConfig.color} onChange={(e) => updateSelected({ color: e.target.value })} style={{ border: "none", width: 30, height: 30, background: 'none' }} />
           </div>
         </div>
 
-        {/* Signal Tools */}
-        <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
-          <button onClick={() => toggleTool("pulse")} style={{ flex: 1, background: activeTool === "pulse" ? config.color : undefined, color: activeTool === "pulse" ? "#000" : undefined, borderColor: activeTool === "pulse" ? config.color : undefined }}>
-            Pulso / Omni
-          </button>
-          <button onClick={() => toggleTool("sector")} style={{ flex: 1, background: activeTool === "sector" ? config.color : undefined, color: activeTool === "sector" ? "#000" : undefined, borderColor: activeTool === "sector" ? config.color : undefined }}>
-            Sector
-          </button>
+        {!selectedElement && (
+          <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
+            <button onClick={() => toggleTool("pulse")} style={{ flex: 1, background: activeTool === "pulse" ? config.color : '', color: activeTool === "pulse" ? '#000' : '' }}>Pulso</button>
+            <button onClick={() => toggleTool("sector")} style={{ flex: 1, background: activeTool === "sector" ? config.color : '', color: activeTool === "sector" ? '#000' : '' }}>Sector</button>
+          </div>
+        )}
+
+        <div style={{ marginTop: 24, padding: 16, background: "rgba(255,255,255,0.03)", borderRadius: 8 }}>
+          <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 16, fontWeight: 700 }}>{selectedElement?.type === 'parish' ? 'EDITAR PARROQUIA' : 'ESTILO PARROQUIAS'}</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}><label style={{ fontSize: 13 }}>Visibilidad</label><input type="checkbox" checked={currentParish.visible} onChange={(e) => updateSelectedParish({ visible: e.target.checked })} /></div>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}><label>Opacidad</label><span>{Math.round(currentParish.opacity * 100)}%</span></div>
+            <input type="range" min="0" max="1" step="0.05" value={currentParish.opacity} onChange={(e) => updateSelectedParish({ opacity: Number(e.target.value) })} style={{ width: "100%" }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}><label style={{ fontSize: 13 }}>Color</label><input type="color" value={currentParish.color} onChange={(e) => updateSelectedParish({ color: e.target.value })} style={{ border: "none", width: 30, height: 30, background: 'none' }} /></div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><label style={{ fontSize: 13 }}>Sólo Bordes</label><input type="checkbox" checked={currentParish.onlyOutline} onChange={(e) => updateSelectedParish({ onlyOutline: e.target.checked })} /></div>
         </div>
-
-        {/* Parish Styling */}
-        <div style={{ marginTop: 24, padding: 16, background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)" }}>
-          <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Estilos de Parroquias</div>
-
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <label style={{ fontSize: 13 }}>Visibilidad</label>
-            <input type="checkbox" checked={parishStyles.visible} onChange={(e) => setParishStyles({ ...parishStyles, visible: e.target.checked })} />
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <label style={{ fontSize: 13 }}>Opacidad Relleno</label>
-              <span style={{ fontSize: 13, opacity: 0.7 }}>{Math.round(parishStyles.opacity * 100)}%</span>
-            </div>
-            <input type="range" min="0" max="1" step="0.05" value={parishStyles.opacity} onChange={(e) => setParishStyles({ ...parishStyles, opacity: Number(e.target.value) })} style={{ width: "100%" }} />
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <label style={{ fontSize: 13 }}>Color Relleno</label>
-            <input type="color" value={parishStyles.color} onChange={(e) => setParishStyles({ ...parishStyles, color: e.target.value })} style={{ border: "none", width: 24, height: 24, padding: 0, background: "none", cursor: "pointer" }} />
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <label style={{ fontSize: 13 }}>Sólo Delimitación</label>
-            <input type="checkbox" checked={parishStyles.onlyOutline} onChange={(e) => setParishStyles({ ...parishStyles, onlyOutline: e.target.checked })} />
-          </div>
-        </div>
-
-        <button onClick={clearMarkers} style={{ marginTop: 24, width: "100%", borderColor: "#ff4444", color: "#ff4444", opacity: 0.8 }}>Limpiar Todo</button>
       </aside>
-
-      <main ref={containerRef} style={{ width: "100%", height: "100%", background: "#0e0e0e" }} />
+      <main ref={containerRef} style={{ width: "100%", height: "100%" }} />
     </div>
   );
 }
