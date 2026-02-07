@@ -4,6 +4,7 @@ import maplibregl, { Map, Popup } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import * as turf from "@turf/turf";
 import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
 
 type FC = GeoJSON.FeatureCollection<GeoJSON.Geometry>;
 type PointFC = GeoJSON.FeatureCollection<GeoJSON.Point>;
@@ -62,15 +63,40 @@ export default function Page() {
   const [activeTool, setActiveTool] = useState<"none" | "pulse" | "sector" | "marker">("none");
   const [isometricMode, setIsometricMode] = useState(true);
 
-  const [config, setConfig] = useState({ radius: 500, angle: 360, azimuth: 0, color: "#ffffff" });
-  const [globalParishStyles, setGlobalParishStyles] = useState<ParishStyles>({ visible: true, opacity: 0.1, color: "#ffffff", height: 100 });
+  const [config, setConfig] = useState({ radius: 500, angle: 360, azimuth: 0, color: "#7F66FF" });
+  const [globalParishStyles, setGlobalParishStyles] = useState<ParishStyles>({ visible: true, opacity: 0.1, color: "#7F66FF", height: 100 });
 
   const animationFrameRef = useRef<number | undefined>(undefined);
   const activeToolRef = useRef(activeTool);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
 
-  // --- Parroquias Data Cache ---
   const parroquiasDataRef = useRef<FC | null>(null);
+
+  const syncData = (map: Map) => {
+    if (!map.isStyleLoaded()) return;
+    (map.getSource(SIGNALS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({
+      type: "FeatureCollection",
+      features: [
+        ...signals.map(s => turf.sector(s.lngLat, s.radius || 0.5, (s.azimuth || 0) - ((s.beamwidth || 0) / 2), (s.azimuth || 0) + ((s.beamwidth || 0) / 2), { properties: { id: s.id, color: s.color, selected: selectedElement?.id === s.id } })),
+        ...signals.map(s => turf.point(s.lngLat, { id: s.id, color: s.color, selected: selectedElement?.id === s.id }))
+      ]
+    });
+    (map.getSource(MARKERS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({ ...markers, features: markers.features.map(f => ({ ...f, properties: { ...f.properties, selected: selectedElement?.id === f.id } })) });
+
+    if (parroquiasDataRef.current) {
+      const data = { ...parroquiasDataRef.current };
+      data.features = data.features.map(f => {
+        const id = String(f.id ?? f.properties?.id);
+        const styles = { ...globalParishStyles, ...parishOverrides[id] };
+        return { ...f, properties: { ...f.properties, id, color: styles.color, height: isometricMode ? (styles.visible ? styles.height : 0) : 0, opacity: styles.opacity } };
+      });
+      (map.getSource(PARISH_SRC_ID) as maplibregl.GeoJSONSource)?.setData(data);
+      data.features.forEach(f => {
+        const id = String(f.id ?? f.properties?.id);
+        map.setFeatureState({ source: PARISH_SRC_ID, id }, { selected: selectedElement?.id === id });
+      });
+    }
+  };
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -94,7 +120,7 @@ export default function Page() {
       map.on("load", async () => {
         const res = await fetch("/data/parroquias_libertador_14.geojson");
         const parroquias = (await res.json()) as FC;
-        parroquiasDataRef.current = parroquias; // Cache it
+        parroquiasDataRef.current = parroquias;
 
         map.addSource(PARISH_SRC_ID, { type: "geojson", data: parroquias, promoteId: "id" } as any);
 
@@ -103,10 +129,10 @@ export default function Page() {
           type: "fill-extrusion",
           source: PARISH_SRC_ID,
           paint: {
-            "fill-extrusion-color": ["coalesce", ["get", "color"], "#ffffff"],
+            "fill-extrusion-color": ["coalesce", ["get", "color"], "#7F66FF"],
             "fill-extrusion-height": ["coalesce", ["get", "height"], 0],
             "fill-extrusion-base": 0,
-            "fill-extrusion-opacity": 0.4,
+            "fill-extrusion-opacity": 0.3,
           },
         });
 
@@ -115,8 +141,8 @@ export default function Page() {
           type: "line",
           source: PARISH_SRC_ID,
           paint: {
-            "line-color": "#ffffff",
-            "line-opacity": 0.5,
+            "line-color": "#7F66FF",
+            "line-opacity": 0.4,
             "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 4, 0.5],
           },
         });
@@ -148,8 +174,8 @@ export default function Page() {
           source: MARKERS_SRC_ID,
           paint: {
             "circle-radius": ["case", ["==", ["get", "selected"], true], 10, 5],
-            "circle-color": "#ffffff",
-            "circle-stroke-color": "#000",
+            "circle-color": "#7F66FF",
+            "circle-stroke-color": "#fff",
             "circle-stroke-width": 2,
           },
         });
@@ -172,39 +198,12 @@ export default function Page() {
         map.addSource(SIGNALS_WAVE_SRC_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addLayer({ id: SIGNALS_WAVE_ID, type: "fill", source: SIGNALS_WAVE_SRC_ID, paint: { "fill-color": ["get", "color"], "fill-opacity": 0.3 } });
 
-        // Trigger initial render of dynamic data
         syncData(map);
       });
     });
 
     return () => { mapRef.current?.remove(); mapRef.current = null; };
   }, []);
-
-  const syncData = (map: Map) => {
-    if (!map.isStyleLoaded()) return;
-    (map.getSource(SIGNALS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({
-      type: "FeatureCollection",
-      features: [
-        ...signals.map(s => turf.sector(s.lngLat, s.radius || 0.5, (s.azimuth || 0) - ((s.beamwidth || 0) / 2), (s.azimuth || 0) + ((s.beamwidth || 0) / 2), { properties: { id: s.id, color: s.color, selected: selectedElement?.id === s.id } })),
-        ...signals.map(s => turf.point(s.lngLat, { id: s.id, color: s.color, selected: selectedElement?.id === s.id }))
-      ]
-    });
-    (map.getSource(MARKERS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({ ...markers, features: markers.features.map(f => ({ ...f, properties: { ...f.properties, selected: selectedElement?.id === f.id } })) });
-
-    if (parroquiasDataRef.current) {
-      const data = { ...parroquiasDataRef.current };
-      data.features = data.features.map(f => {
-        const id = String(f.id ?? f.properties?.id);
-        const styles = { ...globalParishStyles, ...parishOverrides[id] };
-        return { ...f, properties: { ...f.properties, id, color: styles.color, height: isometricMode ? (styles.visible ? styles.height : 0) : 0, opacity: styles.opacity } };
-      });
-      (map.getSource(PARISH_SRC_ID) as maplibregl.GeoJSONSource)?.setData(data);
-      data.features.forEach(f => {
-        const id = String(f.id ?? f.properties?.id);
-        map.setFeatureState({ source: PARISH_SRC_ID, id }, { selected: selectedElement?.id === id });
-      });
-    }
-  };
 
   useEffect(() => {
     const map = mapRef.current;
@@ -234,7 +233,6 @@ export default function Page() {
     if (mapRef.current) syncData(mapRef.current);
   }, [signals, markers, parishOverrides, globalParishStyles, selectedElement, isometricMode]);
 
-
   useEffect(() => {
     const animate = () => {
       const map = mapRef.current;
@@ -257,109 +255,116 @@ export default function Page() {
     else setConfig({ ...config, ...u });
   };
 
-  const updateSelectedParish = (u: Partial<ParishStyles>) => {
-    if (selectedElement?.type === 'parish') setParishOverrides(p => ({ ...p, [selectedElement.id]: { ...p[selectedElement.id], ...u } }));
-    else setGlobalParishStyles(p => ({ ...p, ...u }));
-  };
-
   const currentConfig = selectedElement?.type === 'signal' ? {
     radius: Math.round((signals.find(s => s.id === selectedElement.id)?.radius || 0) * 1000),
     angle: signals.find(s => s.id === selectedElement.id)?.beamwidth || 360,
     azimuth: signals.find(s => s.id === selectedElement.id)?.azimuth || 0,
-    color: signals.find(s => s.id === selectedElement.id)?.color || "#ffffff"
+    color: signals.find(s => s.id === selectedElement.id)?.color || "#7F66FF"
   } : config;
 
-  const currentParish = selectedElement?.type === 'parish' ? { ...globalParishStyles, ...parishOverrides[selectedElement.id] } : globalParishStyles;
-
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", height: "100vh", background: "#000" }}>
-      <aside style={{ padding: "30px", borderRight: "1px solid rgba(255,255,255,0.1)", overflowY: "auto", display: "flex", flexDirection: "column", gap: "30px" }}>
-        {/* Branding */}
+    <div style={{ height: "100vh", display: "grid", gridTemplateColumns: "1fr", position: "relative", background: "var(--bg-deep)" }}>
+      {/* Sidebar - Modern Floating Card */}
+      <motion.aside
+        initial={{ x: -400 }}
+        animate={{ x: 0 }}
+        className="glass-card"
+        style={{
+          position: "absolute",
+          top: "20px",
+          left: "20px",
+          bottom: "20px",
+          width: "360px",
+          zIndex: 10,
+          padding: "30px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "30px",
+          boxShadow: "0 20px 50px rgba(0,0,0,0.8)"
+        }}
+      >
         <div>
-          <h1 style={{ fontSize: "18px", margin: 0, letterSpacing: "2px", textTransform: "uppercase" }}>PROYECTO GALILEO</h1>
-          <div style={{ fontSize: "10px", opacity: 0.4, letterSpacing: "1px", marginTop: "4px" }} className="mono">BY JEAN CLAUDE</div>
+          <h1 style={{ fontSize: "22px", margin: 0, color: "var(--white)" }}>GALILEO_CORE</h1>
+          <div style={{ fontSize: "10px", color: "var(--accent-purple)", fontWeight: "bold", marginTop: "4px" }} className="mono">DESIGN BY JEAN CLAUDE</div>
         </div>
 
-        {/* Global Actions */}
-        <div style={{ display: "flex", gap: "10px" }}>
-          <button onClick={() => { localStorage.setItem("markers_fc", JSON.stringify(markers)); localStorage.setItem("signals_list", JSON.stringify(signals)); alert("SYSTEM SYNCED"); }} style={{ flex: 1 }}>SAVE SYSTEM</button>
-          <Link href="/dashboard" style={{ flex: 1, textDecoration: "none" }}>
-            <button className="secondary" style={{ width: "100%" }}>DASHBOARD</button>
-          </Link>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+          <button onClick={() => { localStorage.setItem("markers_fc", JSON.stringify(markers)); localStorage.setItem("signals_list", JSON.stringify(signals)); alert("SYNC_COMPLETE"); }} style={{ gridColumn: "span 2" }}>COMMIT_CHANGES</button>
+          <Link href="/dashboard" style={{ textDecoration: "none" }}><button className="secondary" style={{ width: "100%" }}>DASHBOARD</button></Link>
           <button onClick={() => window.location.href = "/login"} className="secondary">EXIT</button>
         </div>
 
-        {/* Dynamic Editor */}
-        <div style={{ borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "20px" }}>
-          <div style={{ fontSize: "10px", opacity: 0.5, marginBottom: "20px", letterSpacing: "1px" }} className="mono">
-            {selectedElement ? `EDITING_${selectedElement.type.toUpperCase()}_${selectedElement.id.slice(-4)}` : "SYSTEM_CONFIGURATION"}
+        <div style={{ borderTop: "1px solid var(--border-light)", paddingTop: "25px" }}>
+          <div style={{ fontSize: "10px", color: "var(--text-dim)", marginBottom: "20px" }} className="mono">
+            {selectedElement ? `EDITING_${selectedElement.type.toUpperCase()}_${selectedElement.id.slice(-4)}` : "TACTICAL_OVERLAY_CONFIG"}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "25px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                <span>RANGE_SCALE</span>
-                <span className="mono">{currentConfig.radius}M</span>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={selectedElement?.id || 'default'}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              style={{ display: "flex", flexDirection: "column", gap: "25px" }}
+            >
+              <div className="flex-col gap-sm">
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
+                  <span className="mono">RANGE</span>
+                  <span className="mono" style={{ color: "var(--accent-purple)" }}>{currentConfig.radius}M</span>
+                </div>
+                <input type="range" min="50" max="15000" step="50" value={currentConfig.radius} onChange={(e) => updateSelected({ radius: Number(e.target.value) })} />
               </div>
-              <input type="range" min="50" max="15000" step="50" value={currentConfig.radius} onChange={(e) => updateSelected({ radius: Number(e.target.value) })} />
-            </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                <span>BEAM_WIDTH</span>
-                <span className="mono">{currentConfig.angle}°</span>
+              <div className="flex-col gap-sm">
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
+                  <span className="mono">BEAM</span>
+                  <span className="mono" style={{ color: "var(--accent-purple)" }}>{currentConfig.angle}°</span>
+                </div>
+                <input type="range" min="10" max="360" step="10" value={currentConfig.angle} onChange={(e) => updateSelected({ angle: Number(e.target.value) })} />
               </div>
-              <input type="range" min="10" max="360" step="10" value={currentConfig.angle} onChange={(e) => updateSelected({ angle: Number(e.target.value) })} />
-            </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                <span>ORIENTATION</span>
-                <span className="mono">{currentConfig.azimuth}°</span>
+              <div className="flex-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                <span className="mono" style={{ fontSize: "11px" }}>CHROMA</span>
+                <input type="color" value={currentConfig.color} onChange={(e) => updateSelected({ color: e.target.value })} style={{ width: "32px", height: "32px", background: "none", border: "1px solid var(--border-light)", borderRadius: "8px", cursor: "pointer" }} />
               </div>
-              <input type="range" min="0" max="360" step="1" value={currentConfig.azimuth} onChange={(e) => updateSelected({ azimuth: Number(e.target.value) })} />
-            </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: "12px" }}>CHROMA_KEY</span>
-              <input type="color" value={currentConfig.color} onChange={(e) => updateSelected({ color: e.target.value })} style={{ width: "30px", height: "30px", background: "none", border: "1px solid rgba(255,255,255,0.2)" }} />
-            </div>
+              {selectedElement && (selectedElement.type === 'signal' || selectedElement.type === 'marker') && (
+                <button onClick={() => {
+                  if (selectedElement.type === 'signal') setSignals(prev => prev.filter(s => s.id !== selectedElement.id));
+                  else if (selectedElement.type === 'marker') setMarkers(prev => ({ ...prev, features: prev.features.filter(f => f.id !== selectedElement.id) }));
+                  setSelectedElement(null);
+                }} className="danger">ELIMINAR_ENTIDAD</button>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
 
-            {selectedElement && (selectedElement.type === 'signal' || selectedElement.type === 'marker') && (
-              <button onClick={() => {
-                if (selectedElement.type === 'signal') setSignals(prev => prev.filter(s => s.id !== selectedElement.id));
-                else if (selectedElement.type === 'marker') setMarkers(prev => ({ ...prev, features: prev.features.filter(f => f.id !== selectedElement.id) }));
-                setSelectedElement(null);
-              }} style={{ marginTop: "10px", width: "100%", background: "rgba(255, 68, 68, 0.1)", border: "1px solid #ff444466", color: "#ff4444", fontSize: "11px" }}>
-                ELIMINAR_ELEMENTO
-              </button>
-            )}
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          <div style={{ fontSize: "10px", color: "var(--text-dim)", marginBottom: "5px" }} className="mono">ENTITIES_DEPLOYMENT</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+            <button onClick={() => setActiveTool("marker")} className={activeTool === "marker" ? "" : "secondary"} style={{ fontSize: "11px" }}>POINT</button>
+            <button onClick={() => setActiveTool("pulse")} className={activeTool === "pulse" ? "" : "secondary"} style={{ fontSize: "11px" }}>PULSE</button>
+            <button onClick={() => setActiveTool("sector")} className={activeTool === "sector" ? "" : "secondary"} style={{ fontSize: "11px", gridColumn: "span 2" }}>SECTOR_BEAM</button>
           </div>
         </div>
 
-        {/* Toolset */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-          <button onClick={() => setActiveTool("marker")} className={activeTool === "marker" ? "" : "secondary"} style={{ fontSize: "11px" }}>POINT</button>
-          <button onClick={() => setActiveTool("pulse")} className={activeTool === "pulse" ? "" : "secondary"} style={{ fontSize: "11px" }}>PULSE</button>
-          <button onClick={() => setActiveTool("sector")} className={activeTool === "sector" ? "" : "secondary"} style={{ fontSize: "11px", gridColumn: "span 2" }}>SECTOR_BEAM</button>
-        </div>
-
-        {/* Environment Control */}
-        <div style={{ marginTop: "auto", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "20px" }}>
-          <div style={{ fontSize: "10px", opacity: 0.5, marginBottom: "15px", letterSpacing: "1px" }} className="mono">ENVIRONMENTAL_DATA</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <button onClick={() => setIsometricMode(!isometricMode)} className="secondary" style={{ width: "100%", fontSize: "10px" }}>
-              ISOMETRIC_MODE: {isometricMode ? "ON" : "OFF"}
-            </button>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", opacity: 0.6 }} className="mono">
-              <span>LAT: 8.5822</span>
-              <span>LNG: -71.1505</span>
-            </div>
+        <div style={{ marginTop: "auto", borderTop: "1px solid var(--border-light)", paddingTop: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--text-dim)" }} className="mono">
+            <span>COORD_NODE: 8.5822 / -71.1505</span>
           </div>
+          <button onClick={() => setIsometricMode(!isometricMode)} className="secondary" style={{ width: "100%", marginTop: "15px", fontSize: "10px" }}>
+            {isometricMode ? "DISABLE_ISOMETRIC_RENDER" : "ENABLE_ISOMETRIC_RENDER"}
+          </button>
         </div>
-      </aside>
+      </motion.aside>
 
       <main ref={containerRef} style={{ width: "100%", height: "100%" }} />
+
+      <div style={{ position: "absolute", top: "20px", right: "20px", pointerEvents: "none" }}>
+        <div className="glass-card mono" style={{ padding: "10px 20px", fontSize: "10px", color: "var(--accent-green)" }}>
+          UPLINK_STATUS: ACTIVE // 128ms
+        </div>
+      </div>
     </div>
   );
 }

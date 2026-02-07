@@ -1,81 +1,70 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
+import Link from "next/link";
+import { motion } from "framer-motion";
 
 export default function LoginPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
 
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        window.location.href = "/";
+    };
+
     return (
         <div style={{
             height: "100vh",
             display: "flex",
-            flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            background: "radial-gradient(circle at center, #111 0%, #000 100%)",
+            background: "radial-gradient(circle at 20% 30%, rgba(127, 102, 255, 0.08) 0%, transparent 40%), radial-gradient(circle at 80% 70%, rgba(9, 80, 195, 0.08) 0%, transparent 40%), var(--bg-deep)",
             padding: "20px"
         }}>
-            {/* Branding */}
-            <div style={{ textAlign: "center", marginBottom: "60px" }}>
-                <h1 style={{ fontSize: "32px", margin: 0, letterSpacing: "4px", textTransform: "uppercase" }}>
-                    PROYECTO GALILEO
-                </h1>
-                <div style={{ fontSize: "12px", opacity: 0.5, letterSpacing: "2px", marginTop: "8px" }} className="mono">
-                    SYSTEMS ARCHITECTURE BY JEAN CLAUDE
+            <motion.div
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="glass-card"
+                style={{ padding: "50px", width: "100%", maxWidth: "450px", display: "flex", flexDirection: "column", gap: "35px" }}
+            >
+                <div style={{ textAlign: "center" }}>
+                    <h1 style={{ fontSize: "32px", fontWeight: "900", letterSpacing: "-0.04em" }}>GALILEO_NODE</h1>
+                    <div style={{ fontSize: "10px", color: "var(--accent-purple)", marginTop: "8px", fontWeight: "bold" }} className="mono">AUTHENTICATION_PROTOCOL_V4</div>
                 </div>
-            </div>
 
-            {/* Auth Card */}
-            <div style={{
-                width: "100%",
-                maxWidth: "400px",
-                background: "rgba(255, 255, 255, 0.02)",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
-                padding: "40px"
-            }}>
-                <h2 style={{ fontSize: "14px", marginBottom: "30px", opacity: 0.8, letterSpacing: "1px" }} className="mono">
-                    USER AUTHENTICATION
-                </h2>
-
-                <form onSubmit={(e) => { e.preventDefault(); window.location.href = "/"; }} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <label style={{ fontSize: "10px", opacity: 0.5, letterSpacing: "1px" }} className="mono">IDENTIFIER</label>
+                <form style={{ display: "flex", flexDirection: "column", gap: "25px" }} onSubmit={handleSubmit}>
+                    <div className="flex-col gap-sm">
+                        <label style={{ fontSize: "10px", color: "var(--text-dim)" }} className="mono">UPLINK_IDENTITY</label>
                         <input
                             type="email"
-                            placeholder="EMAIL ADDRESS"
+                            placeholder="operator@galileo.sys"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
+                            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border-light)", padding: "16px", borderRadius: "12px", color: "#fff", outline: "none", transition: "var(--transition-smooth)" }}
                             required
                         />
                     </div>
 
-                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <label style={{ fontSize: "10px", opacity: 0.5, letterSpacing: "1px" }} className="mono">ACCESS KEY</label>
+                    <div className="flex-col gap-sm">
+                        <label style={{ fontSize: "10px", color: "var(--text-dim)" }} className="mono">SECURE_PASSCODE</label>
                         <input
                             type="password"
-                            placeholder="PASSWORD"
+                            placeholder="••••••••"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
+                            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border-light)", padding: "16px", borderRadius: "12px", color: "#fff", outline: "none", transition: "var(--transition-smooth)" }}
                             required
                         />
                     </div>
 
-                    <button type="submit" style={{ marginTop: "20px" }}>
-                        INITIALIZE SESSION
-                    </button>
+                    <button type="submit" style={{ marginTop: "10px", height: "55px" }}>INITIALIZE_SESSION</button>
                 </form>
 
-                <div style={{ marginTop: "30px", textAlign: "center", fontSize: "11px", opacity: 0.6 }} className="mono">
-                    NEW USER? <Link href="/signup" style={{ color: "#fff", textDecoration: "underline", marginLeft: "10px" }}>REQUEST ACCESS</Link>
+                <div style={{ textAlign: "center", fontSize: "12px", color: "var(--text-dim)" }}>
+                    AWAITING ACCESS? <Link href="/signup" style={{ color: "var(--accent-purple)", textDecoration: "none", fontWeight: "bold" }}>REQUEST_ENROLLMENT</Link>
                 </div>
-            </div>
-
-            {/* Footer Decoration */}
-            <div style={{ position: "absolute", bottom: "40px", fontSize: "10px", opacity: 0.3, letterSpacing: "2px" }} className="mono">
-                EST. 2026 // GALILEO CORE v2.0
-            </div>
+            </motion.div>
         </div>
     );
 }

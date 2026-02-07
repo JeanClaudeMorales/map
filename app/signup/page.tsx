@@ -1,93 +1,71 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
+import Link from "next/link";
+import { motion } from "framer-motion";
 
 export default function SignupPage() {
-    const [name, setName] = useState("");
     const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
+    const [name, setName] = useState("");
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        alert("REQUEST_SUBMITTED");
+        window.location.href = "/login";
+    };
 
     return (
         <div style={{
             height: "100vh",
             display: "flex",
-            flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            background: "radial-gradient(circle at center, #111 0%, #000 100%)",
+            background: "radial-gradient(circle at 80% 30%, rgba(4, 159, 108, 0.08) 0%, transparent 40%), radial-gradient(circle at 20% 70%, rgba(127, 102, 255, 0.08) 0%, transparent 40%), var(--bg-deep)",
             padding: "20px"
         }}>
-            {/* Branding */}
-            <div style={{ textAlign: "center", marginBottom: "60px" }}>
-                <h1 style={{ fontSize: "32px", margin: 0, letterSpacing: "4px", textTransform: "uppercase" }}>
-                    PROYECTO GALILEO
-                </h1>
-                <div style={{ fontSize: "12px", opacity: 0.5, letterSpacing: "2px", marginTop: "8px" }} className="mono">
-                    SYSTEMS ARCHITECTURE BY JEAN CLAUDE
+            <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="glass-card"
+                style={{ padding: "50px", width: "100%", maxWidth: "450px", display: "flex", flexDirection: "column", gap: "35px" }}
+            >
+                <div style={{ textAlign: "center" }}>
+                    <h1 style={{ fontSize: "32px", fontWeight: "900", letterSpacing: "-0.04em" }}>JOIN_GALILEO</h1>
+                    <div style={{ fontSize: "10px", color: "var(--accent-green)", marginTop: "8px", fontWeight: "bold" }} className="mono">OPERATOR_ENROLLMENT_UPLINK</div>
                 </div>
-            </div>
 
-            {/* Auth Card */}
-            <div style={{
-                width: "100%",
-                maxWidth: "400px",
-                background: "rgba(255, 255, 255, 0.02)",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
-                padding: "40px"
-            }}>
-                <h2 style={{ fontSize: "14px", marginBottom: "30px", opacity: 0.8, letterSpacing: "1px" }} className="mono">
-                    SYSTEM REGISTRATION
-                </h2>
-
-                <form onSubmit={(e) => { e.preventDefault(); window.location.href = "/login"; }} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <label style={{ fontSize: "10px", opacity: 0.5, letterSpacing: "1px" }} className="mono">FULL NAME</label>
+                <form style={{ display: "flex", flexDirection: "column", gap: "25px" }} onSubmit={handleSubmit}>
+                    <div className="flex-col gap-sm">
+                        <label style={{ fontSize: "10px", color: "var(--text-dim)" }} className="mono">OPERATOR_NAME</label>
                         <input
                             type="text"
-                            placeholder="YOUR NAME"
+                            placeholder="Commander Shepard"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
+                            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border-light)", padding: "16px", borderRadius: "12px", color: "#fff", outline: "none", transition: "var(--transition-smooth)" }}
                             required
                         />
                     </div>
 
-                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <label style={{ fontSize: "10px", opacity: 0.5, letterSpacing: "1px" }} className="mono">EMAIL ADDRESS</label>
+                    <div className="flex-col gap-sm">
+                        <label style={{ fontSize: "10px", color: "var(--text-dim)" }} className="mono">UPLINK_IDENTITY_EMAIL</label>
                         <input
                             type="email"
-                            placeholder="IDENTIFIER"
+                            placeholder="commander@galactic.com"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
+                            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border-light)", padding: "16px", borderRadius: "12px", color: "#fff", outline: "none", transition: "var(--transition-smooth)" }}
                             required
                         />
                     </div>
 
-                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <label style={{ fontSize: "10px", opacity: 0.5, letterSpacing: "1px" }} className="mono">PASSWORD</label>
-                        <input
-                            type="password"
-                            placeholder="NEW ACCESS KEY"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required
-                        />
-                    </div>
-
-                    <button type="submit" style={{ marginTop: "20px" }}>
-                        REQUEST ACCESS
-                    </button>
+                    <button type="submit" style={{ marginTop: "10px", height: "55px", background: "var(--accent-green)" }}>REQUEST_NODE_ACCESS</button>
                 </form>
 
-                <div style={{ marginTop: "30px", textAlign: "center", fontSize: "11px", opacity: 0.6 }} className="mono">
-                    ALREADY REGISTERED? <Link href="/login" style={{ color: "#fff", textDecoration: "underline", marginLeft: "10px" }}>INITIALIZE SESSION</Link>
+                <div style={{ textAlign: "center", fontSize: "12px", color: "var(--text-dim)" }}>
+                    ALREADY ENROLLED? <Link href="/login" style={{ color: "var(--accent-green)", textDecoration: "none", fontWeight: "bold" }}>RETURN_TO_LOGIN</Link>
                 </div>
-            </div>
-
-            {/* Footer Decoration */}
-            <div style={{ position: "absolute", bottom: "40px", fontSize: "10px", opacity: 0.3, letterSpacing: "2px" }} className="mono">
-                EST. 2026 // GALILEO CORE v2.0
-            </div>
+            </motion.div>
         </div>
     );
 }
