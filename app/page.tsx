@@ -295,10 +295,10 @@ export default function Page() {
   function clearMarkers() {
     setMarkers({ type: "FeatureCollection", features: [] });
     saveMarkers({ type: "FeatureCollection", features: [] });
-    mapRef.current?.getSource(MARKERS_SRC_ID)?.setData({ type: "FeatureCollection", features: [] });
+    (mapRef.current?.getSource(MARKERS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({ type: "FeatureCollection", features: [] });
 
     setSignals([]);
-    mapRef.current?.getSource(SIGNALS_SRC_ID)?.setData({ type: "FeatureCollection", features: [] });
+    (mapRef.current?.getSource(SIGNALS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({ type: "FeatureCollection", features: [] });
   }
 
   // Helper to handle tool selection
