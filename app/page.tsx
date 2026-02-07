@@ -69,6 +69,9 @@ export default function Page() {
   const activeToolRef = useRef(activeTool);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
 
+  // --- Parroquias Data Cache ---
+  const parroquiasDataRef = useRef<FC | null>(null);
+
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -91,6 +94,8 @@ export default function Page() {
       map.on("load", async () => {
         const res = await fetch("/data/parroquias_libertador_14.geojson");
         const parroquias = (await res.json()) as FC;
+        parroquiasDataRef.current = parroquias; // Cache it
+
         map.addSource(PARISH_SRC_ID, { type: "geojson", data: parroquias, promoteId: "id" } as any);
 
         map.addLayer({
@@ -166,11 +171,40 @@ export default function Page() {
 
         map.addSource(SIGNALS_WAVE_SRC_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addLayer({ id: SIGNALS_WAVE_ID, type: "fill", source: SIGNALS_WAVE_SRC_ID, paint: { "fill-color": ["get", "color"], "fill-opacity": 0.3 } });
+
+        // Trigger initial render of dynamic data
+        syncData(map);
       });
     });
 
     return () => { mapRef.current?.remove(); mapRef.current = null; };
   }, []);
+
+  const syncData = (map: Map) => {
+    if (!map.isStyleLoaded()) return;
+    (map.getSource(SIGNALS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({
+      type: "FeatureCollection",
+      features: [
+        ...signals.map(s => turf.sector(s.lngLat, s.radius || 0.5, (s.azimuth || 0) - ((s.beamwidth || 0) / 2), (s.azimuth || 0) + ((s.beamwidth || 0) / 2), { properties: { id: s.id, color: s.color, selected: selectedElement?.id === s.id } })),
+        ...signals.map(s => turf.point(s.lngLat, { id: s.id, color: s.color, selected: selectedElement?.id === s.id }))
+      ]
+    });
+    (map.getSource(MARKERS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({ ...markers, features: markers.features.map(f => ({ ...f, properties: { ...f.properties, selected: selectedElement?.id === f.id } })) });
+
+    if (parroquiasDataRef.current) {
+      const data = { ...parroquiasDataRef.current };
+      data.features = data.features.map(f => {
+        const id = String(f.id ?? f.properties?.id);
+        const styles = { ...globalParishStyles, ...parishOverrides[id] };
+        return { ...f, properties: { ...f.properties, id, color: styles.color, height: isometricMode ? (styles.visible ? styles.height : 0) : 0, opacity: styles.opacity } };
+      });
+      (map.getSource(PARISH_SRC_ID) as maplibregl.GeoJSONSource)?.setData(data);
+      data.features.forEach(f => {
+        const id = String(f.id ?? f.properties?.id);
+        map.setFeatureState({ source: PARISH_SRC_ID, id }, { selected: selectedElement?.id === id });
+      });
+    }
+  };
 
   useEffect(() => {
     const map = mapRef.current;
@@ -197,26 +231,9 @@ export default function Page() {
   }, [config]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    (map.getSource(SIGNALS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({
-      type: "FeatureCollection",
-      features: [
-        ...signals.map(s => turf.sector(s.lngLat, s.radius || 0.5, (s.azimuth || 0) - ((s.beamwidth || 0) / 2), (s.azimuth || 0) + ((s.beamwidth || 0) / 2), { properties: { id: s.id, color: s.color, selected: selectedElement?.id === s.id } })),
-        ...signals.map(s => turf.point(s.lngLat, { id: s.id, color: s.color, selected: selectedElement?.id === s.id }))
-      ]
-    });
-    (map.getSource(MARKERS_SRC_ID) as maplibregl.GeoJSONSource)?.setData({ ...markers, features: markers.features.map(f => ({ ...f, properties: { ...f.properties, selected: selectedElement?.id === f.id } })) });
-    fetch("/data/parroquias_libertador_14.geojson").then(r => r.json()).then((data: FC) => {
-      data.features.forEach(f => {
-        const id = String(f.id ?? f.properties?.id);
-        const styles = { ...globalParishStyles, ...parishOverrides[id] };
-        f.properties = { ...f.properties, id, color: styles.color, height: isometricMode ? (styles.visible ? styles.height : 0) : 0, opacity: styles.opacity };
-        map.setFeatureState({ source: PARISH_SRC_ID, id }, { selected: selectedElement?.id === id });
-      });
-      (map.getSource(PARISH_SRC_ID) as maplibregl.GeoJSONSource)?.setData(data);
-    });
+    if (mapRef.current) syncData(mapRef.current);
   }, [signals, markers, parishOverrides, globalParishStyles, selectedElement, isometricMode]);
+
 
   useEffect(() => {
     const animate = () => {
@@ -266,6 +283,9 @@ export default function Page() {
         {/* Global Actions */}
         <div style={{ display: "flex", gap: "10px" }}>
           <button onClick={() => { localStorage.setItem("markers_fc", JSON.stringify(markers)); localStorage.setItem("signals_list", JSON.stringify(signals)); alert("SYSTEM SYNCED"); }} style={{ flex: 1 }}>SAVE SYSTEM</button>
+          <Link href="/dashboard" style={{ flex: 1, textDecoration: "none" }}>
+            <button className="secondary" style={{ width: "100%" }}>DASHBOARD</button>
+          </Link>
           <button onClick={() => window.location.href = "/login"} className="secondary">EXIT</button>
         </div>
 
@@ -304,6 +324,16 @@ export default function Page() {
               <span style={{ fontSize: "12px" }}>CHROMA_KEY</span>
               <input type="color" value={currentConfig.color} onChange={(e) => updateSelected({ color: e.target.value })} style={{ width: "30px", height: "30px", background: "none", border: "1px solid rgba(255,255,255,0.2)" }} />
             </div>
+
+            {selectedElement && (selectedElement.type === 'signal' || selectedElement.type === 'marker') && (
+              <button onClick={() => {
+                if (selectedElement.type === 'signal') setSignals(prev => prev.filter(s => s.id !== selectedElement.id));
+                else if (selectedElement.type === 'marker') setMarkers(prev => ({ ...prev, features: prev.features.filter(f => f.id !== selectedElement.id) }));
+                setSelectedElement(null);
+              }} style={{ marginTop: "10px", width: "100%", background: "rgba(255, 68, 68, 0.1)", border: "1px solid #ff444466", color: "#ff4444", fontSize: "11px" }}>
+                ELIMINAR_ELEMENTO
+              </button>
+            )}
           </div>
         </div>
 
