@@ -1,8 +1,9 @@
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import * as turf from "@turf/turf"; // Import turf for centroid calculation
 
-// Types (reusing from page.tsx to keep consistency, ideally should be in types file)
+// Types
 interface Signal {
     id: string;
     type: "pulse" | "sector";
@@ -32,7 +33,7 @@ interface Person {
     whatsapp: string;
     address: string;
     email: string;
-    lngLat?: [number, number]; // linked location
+    lngLat?: [number, number];
 }
 
 
@@ -57,6 +58,7 @@ interface SidebarProps {
     setGlobalParishStyles: any;
     people: Person[];
     setPeople: React.Dispatch<React.SetStateAction<Person[]>>;
+    parishesList: any[]; // New prop
     onFlyTo: (lngLat: [number, number]) => void;
 }
 
@@ -71,13 +73,12 @@ export const Sidebar = ({
     currentConfig, updateSelected,
     globalParishStyles, setGlobalParishStyles,
     people, setPeople,
+    parishesList,
     onFlyTo
 }: SidebarProps) => {
 
     const [activeSection, setActiveSection] = useState<"tactical" | "parish" | "registry" | "explorer">("tactical");
     const [personForm, setPersonForm] = useState<Person>({ id: "", name: "", whatsapp: "", address: "", email: "" });
-
-    // Filter lists for explorer
     const [explorerFilter, setExplorerFilter] = useState("");
 
     const handleRegister = () => {
@@ -93,6 +94,13 @@ export const Sidebar = ({
     const deletePerson = (id: string) => {
         if (confirm("CONFIRM_DELETE_PERSON?")) {
             setPeople(prev => prev.filter(p => p.id !== id));
+        }
+    };
+
+    const deleteAllPoints = () => {
+        if (confirm("CONFIRM_DELETE_ALL_POINTS? THIS CANNOT BE UNDONE.")) {
+            setMarkers({ type: "FeatureCollection", features: [] });
+            if (selectedElement?.type === 'marker') setSelectedElement(null);
         }
     };
 
@@ -123,7 +131,6 @@ export const Sidebar = ({
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                 <button onClick={() => {
-                    // Trigger save in parent or just use effect syncing
                     alert("SYNC_COMPLETE (LOCAL)");
                 }} style={{ gridColumn: "span 2" }}>COMMIT_CHANGES</button>
                 <Link href="/dashboard" style={{ textDecoration: "none" }}><button className="secondary" style={{ width: "100%" }}>DASHBOARD</button></Link>
@@ -214,6 +221,9 @@ export const Sidebar = ({
                                     setSelectedElement(null);
                                 }} className="danger">ELIMINAR_ENTIDAD</button>
                             )}
+
+                            <button onClick={deleteAllPoints} className="danger outlined" style={{ marginTop: "10px" }}>DELETE_ALL_POINTS</button>
+
                         </motion.div>
                     )}
 
@@ -354,14 +364,48 @@ export const Sidebar = ({
                                 type="text"
                                 placeholder="SEARCH_ENTITY..."
                                 value={explorerFilter}
-                                onChange={(e) => setExplorerFilter(e.target.value)}
+                                onChange={(e) => setExplorerFilter(e.target.value.toLowerCase())}
                                 style={{ fontSize: "10px", padding: "8px" }}
                             />
 
+                            {/* PARISHES LIST */}
+                            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                                <div className="mono" style={{ fontSize: "9px", color: "var(--accent-purple)", marginTop: "5px" }}>PARISH_ZONES ({parishesList.length})</div>
+                                {parishesList.filter((f: any) => (f.properties?.name_full || f.id || "").toLowerCase().includes(explorerFilter)).map((f: any) => (
+                                    <div
+                                        key={f.id || f.properties?.id}
+                                        style={{
+                                            padding: "8px",
+                                            background: "rgba(127,102,255,0.1)",
+                                            borderRadius: "6px",
+                                            fontSize: "10px",
+                                            cursor: "pointer",
+                                            border: selectedElement?.id === String(f.id || f.properties?.id) ? "1px solid var(--accent-purple)" : "1px solid transparent",
+                                            display: "flex",
+                                            justifyContent: "space-between"
+                                        }}
+                                        onClick={() => {
+                                            const id = String(f.id || f.properties?.id);
+                                            setSelectedElement({ id, type: "parish" });
+                                            // Calculate centroid to fly to
+                                            if (f.geometry) {
+                                                try {
+                                                    const center = turf.centerOfMass(f).geometry.coordinates as [number, number];
+                                                    onFlyTo(center);
+                                                } catch (e) { console.error("Centroid error", e); }
+                                            }
+                                        }}
+                                    >
+                                        <span className="mono">{f.properties?.name_full?.slice(0, 20) || `ENTITY_${f.id}`}</span>
+                                        {selectedElement?.id === String(f.id || f.properties?.id) && <span style={{ color: "var(--accent-purple)" }}>●</span>}
+                                    </div>
+                                ))}
+                            </div>
+
                             {/* POINTS */}
                             <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-                                <div className="mono" style={{ fontSize: "9px", color: "var(--accent-purple)" }}>TACTICAL_POINTS ({markers.features.length})</div>
-                                {markers.features.filter((f: any) => f.id.includes(explorerFilter)).map((f: any) => (
+                                <div className="mono" style={{ fontSize: "9px", color: "var(--accent-purple)", marginTop: "10px" }}>TACTICAL_POINTS ({markers.features.length})</div>
+                                {markers.features.filter((f: any) => f.id.toLowerCase().includes(explorerFilter)).map((f: any) => (
                                     <div
                                         key={f.id}
                                         style={{
@@ -390,9 +434,9 @@ export const Sidebar = ({
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 <div style={{ fontSize: "10px", color: "var(--text-dim)", marginBottom: "5px" }} className="mono">ENTITIES_DEPLOYMENT</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                    <button onClick={() => setActiveTool("marker")} className={activeTool === "marker" ? "" : "secondary"} style={{ fontSize: "11px" }}>POINT</button>
-                    <button onClick={() => setActiveTool("pulse")} className={activeTool === "pulse" ? "" : "secondary"} style={{ fontSize: "11px" }}>PULSE</button>
-                    <button onClick={() => setActiveTool("sector")} className={activeTool === "sector" ? "" : "secondary"} style={{ fontSize: "11px", gridColumn: "span 2" }}>SECTOR_BEAM</button>
+                    <button onClick={() => setActiveTool("marker")} className={activeTool === "marker" ? "" : "secondary"} style={{ fontSize: "11px", borderColor: activeTool === "marker" ? "var(--accent-purple)" : undefined }}>POINT</button>
+                    <button onClick={() => setActiveTool("pulse")} className={activeTool === "pulse" ? "" : "secondary"} style={{ fontSize: "11px", borderColor: activeTool === "pulse" ? "var(--accent-purple)" : undefined }}>PULSE</button>
+                    <button onClick={() => setActiveTool("sector")} className={activeTool === "sector" ? "" : "secondary"} style={{ fontSize: "11px", gridColumn: "span 2", borderColor: activeTool === "sector" ? "var(--accent-purple)" : undefined }}>SECTOR_BEAM</button>
                 </div>
             </div>
 

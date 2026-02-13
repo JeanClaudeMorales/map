@@ -75,6 +75,7 @@ export default function Page() {
   const [signals, setSignals] = useState<Signal[]>(() => loadFromStorage("signals_list", []));
   const [parishOverrides, setParishOverrides] = useState<Record<string, Partial<ParishStyles>>>(() => loadFromStorage("parish_overrides", {}));
   const [people, setPeople] = useState<Person[]>(() => loadFromStorage("registry_people", []));
+  const [parishesList, setParishesList] = useState<any[]>([]);
 
   const [selectedElement, setSelectedElement] = useState<{ id: string; type: "signal" | "parish" | "marker" } | null>(null);
   const [activeTool, setActiveTool] = useState<"none" | "pulse" | "sector" | "marker">("none");
@@ -103,7 +104,7 @@ export default function Page() {
     localStorage.setItem("registry_people", JSON.stringify(people));
   }, [people]);
 
-  // Persist Markers & Signals (added here to ensure auto-save)
+  // Persist Markers & Signals
   useEffect(() => {
     localStorage.setItem("markers_fc", JSON.stringify(markers));
     localStorage.setItem("signals_list", JSON.stringify(signals));
@@ -139,9 +140,12 @@ export default function Page() {
           const styles = { ...globalParishStyles, ...parishOverrides[id] };
           const isSelected = selectedElement?.id === id;
 
-          // Focus Logic: Dim others if one is selected
-          const finalOpacity = isFocusMode ? (isSelected ? styles.opacity : 0.1) : styles.opacity;
-          const finalColor = isFocusMode ? (isSelected ? styles.color : "#333333") : styles.color; // Darken others
+          // Focus Logic: Dim others heavily
+          const finalOpacity = isFocusMode ? (isSelected ? 0.9 : 0.05) : styles.opacity;
+          const finalColor = isFocusMode ? (isSelected ? styles.color : "#111111") : styles.color;
+
+          // Ensure edits are applied
+          const finalOutlineWidth = styles.outlineWidth;
 
           return {
             ...f,
@@ -152,7 +156,7 @@ export default function Page() {
               height: isometricMode ? (styles.visible ? styles.height : 0) : 0,
               opacity: finalOpacity,
               outlineColor: styles.outlineColor,
-              outlineWidth: styles.outlineWidth,
+              outlineWidth: finalOutlineWidth,
               labelColor: styles.labelColor,
               labelSize: styles.labelSize,
               labelHaloColor: styles.labelHaloColor,
@@ -192,6 +196,7 @@ export default function Page() {
         const res = await fetch("/data/parroquias_libertador_14.geojson");
         const parroquias = (await res.json()) as FC;
         parroquiasDataRef.current = parroquias;
+        setParishesList(parroquias.features || []);
 
         map.addSource(PARISH_SRC_ID, { type: "geojson", data: parroquias, promoteId: "id" } as any);
 
@@ -368,6 +373,7 @@ export default function Page() {
         currentConfig={currentConfig} updateSelected={updateSelected}
         globalParishStyles={globalParishStyles} setGlobalParishStyles={setGlobalParishStyles}
         people={people} setPeople={setPeople}
+        parishesList={parishesList}
         onFlyTo={onFlyTo}
       />
 
